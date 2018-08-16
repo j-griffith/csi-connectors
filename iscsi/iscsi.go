@@ -171,12 +171,12 @@ func waitForPathToExistImpl(devicePath *string, maxRetries int, deviceTransport 
 
 func getMultipathDisk(path string) (string, error) {
 	// Follow link to destination directory
-	device_path, err := os.Readlink(path)
+	devicePath, err := os.Readlink(path)
 	if err != nil {
-		fmt.Errorf("Error reading link: %s -- error: %s", path, err)
+		log.Error.Printf("failed reading link: %s -- error: %s\n", path, err.Error())
 		return "", err
 	}
-	sdevice := filepath.Base(device_path)
+	sdevice := filepath.Base(devicePath)
 	// If destination directory is already identified as a multipath device,
 	// just return its path
 	if strings.HasPrefix(sdevice, "dm-") {
@@ -199,12 +199,11 @@ func getMultipathDisk(path string) (string, error) {
 			}
 		}
 	}
-	return "", fmt.Errorf("Couldn't find dm-* path for path: %s, found non dm-* path: %s", path, device_path)
+	return "", fmt.Errorf("Couldn't find dm-* path for path: %s, found non dm-* path: %s", path, devicePath)
 }
 
 // Connect attempts to connect a volume to this node using the provided Connector info
 func Connect(c Connector) (string, error) {
-
 	var devicePaths []string
 	iFace := "default"
 	if c.Interface != "" {
