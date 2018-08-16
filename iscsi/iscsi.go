@@ -10,6 +10,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	log "github.com/j-griffith/csi-connectors/logger"
 )
 
 type statFunc func(string) (os.FileInfo, error)
@@ -30,7 +32,7 @@ type iscsiSession struct {
 	Name     string
 }
 
-//Connector is blah
+//Connector contains all of the info we need to make an iscsi connection
 type Connector struct {
 	VolumeName       string
 	TargetIqn        string
@@ -78,20 +80,20 @@ func parseSessions(lines string) ([]iscsiSession, error) {
 
 func sessionExists(tgtPortal, tgtIQN string) (bool, error) {
 	sessions, err := getCurrentSessions()
-	fmt.Printf("current sessions: %s\n", sessions)
+	log.Debug.Printf("current sessions: %s\n", sessions)
 	if err != nil {
-		fmt.Printf("huh... error in getsessions: %s\n", err.Error())
+		log.Error.Printf("huh... error in getsessions: %s\n", err.Error())
 		return false, err
 	}
 	var existingSessions []iscsiSession
 	for _, s := range sessions {
-		fmt.Printf("Looking for session:\n  %s:%s\n  %s:%s\n", tgtIQN, s.IQN, tgtPortal, s.Portal)
+		log.Debug.Printf("Looking for session:\n  %s:%s\n  %s:%s\n", tgtIQN, s.IQN, tgtPortal, s.Portal)
 		if tgtIQN == s.IQN && tgtPortal == s.Portal {
 			existingSessions = append(existingSessions, s)
 		}
 	}
 	exists := false
-	fmt.Printf("leng of existing sessions: %s\n", len(existingSessions))
+	log.Debug.Printf("leng of existing sessions: %s\n", len(existingSessions))
 	if len(existingSessions) > 0 {
 		exists = true
 	}
@@ -173,13 +175,13 @@ func Connect(c Connector) (string, error) {
 	// make sure our iface exists and extract the transport type
 	out, err := runCmd("iscsiadm", "-m", "iface", "-I", iFace, "-o", "show")
 	if err != nil {
-		fmt.Printf("error in iface show: %s\n", err.Error())
+		log.Error.Printf("error in iface show: %s\n", err.Error())
 		return "", err
 	}
 	iscsiTransport := extractTransportName(out)
 
 	for _, p := range c.TargetPortals {
-		fmt.Printf("process portal: %s\n", p)
+		log.Debug.Printf("process portal: %s\n", p)
 		baseArgs := []string{"-m", "node", "-T", c.TargetIqn, "-p", p}
 
 		// create our devicePath that we'll be looking for based on the transport being used
@@ -200,13 +202,13 @@ func Connect(c Connector) (string, error) {
 
 		// create db entry
 		args := append(baseArgs, []string{"-I", iFace, "-o", "new"}...)
-		fmt.Printf("create the new record: %s\n", args)
+		log.Debug.Printf("create the new record: %s\n", args)
 		out, err := runCmd("iscsiadm", args...)
 		if err != nil {
-			fmt.Printf("error: %s\n", err.Error())
+			log.Error.Printf("error: %s\n", err.Error())
 			continue
 		}
-		fmt.Printf("output from new: %s\n", out)
+		log.Debug.Printf("output from new: %s\n", out)
 		if c.AuthType == "chap" {
 			args = append(baseArgs, []string{"-o", "update",
 				"-n", "node.session.auth.authmethod", "-v", "CHAP",
