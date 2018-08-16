@@ -43,6 +43,7 @@ type Connector struct {
 	DiscoverySecrets secrets
 	SessionSecrets   secrets
 	Interface        string
+	Multipath        bool
 }
 
 func runCmd(cmd string, args ...string) (string, error) {
@@ -161,6 +162,39 @@ func waitForPathToExistImpl(devicePath *string, maxRetries int, deviceTransport 
 		time.Sleep(time.Second)
 	}
 	return false
+}
+
+func getMultipathDisk(path string) (string, error) {
+	// Follow link to destination directory
+	device_path, err := os.Readlink(path)
+	if err != nil {
+		fmt.Errorf("Error reading link: %s -- error: %s", path, err)
+		return "", err
+	}
+	sdevice := filepath.Base(device_path)
+	// If destination directory is already identified as a multipath device,
+	// just return its path
+	if strings.HasPrefix(sdevice, "dm-") {
+		return path, nil
+	}
+	// Fallback to iterating through all the entries under /sys/block/dm-* and
+	// check to see if any have an entry under /sys/block/dm-*/slaves matching
+	// the device the symlink was pointing at
+	dmpaths, _ := filepath.Glob("/sys/block/dm-*")
+	for _, dmpath := range dmpaths {
+		sdevices, _ := filepath.Glob(filepath.Join(dmpath, "slaves", "*"))
+		for _, spath := range sdevices {
+			s := filepath.Base(spath)
+			if sdevice == s {
+				// We've found a matching entry, return the path for the
+				// dm-* device it was found under
+				p := filepath.Join("/dev", filepath.Base(dmpath))
+				fmt.Printf("Found matching device: %s under dm-* device path %s", sdevice, dmpath)
+				return p, nil
+			}
+		}
+	}
+	return "", fmt.Errorf("Couldn't find dm-* path for path: %s, found non dm-* path: %s", path, device_path)
 }
 
 // Connect attempts to connect a volume to this node using the provided Connector info
