@@ -1,7 +1,7 @@
 package main
 
 import (
-	"fmt"
+	"log"
 
 	"github.com/j-griffith/csi-connectors/iscsi"
 )
@@ -13,10 +13,11 @@ func main() {
 	c.TargetPortals = []string{"192.168.1.107:3260"}
 	c.SessionSecrets.UserName = "86Jx6hXYqDYpKamtgx4d"
 	c.SessionSecrets.Password = "Qj3MuzmHu8cJBpkv"
+	c.Lun = 1
 	path, err := iscsi.Connect(c)
-	fmt.Printf("path is: %s\n", path)
+	log.Printf("path is: %s\n", path)
 	if err != nil {
-		fmt.Printf("err is: %s\n", err.Error())
+		log.Printf("err is: %s\n", err.Error())
 
 	}
 

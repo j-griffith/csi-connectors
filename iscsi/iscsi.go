@@ -10,7 +10,11 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/j-griffith/csi-connectors/logger"
 )
+
+var log *logger.Logger
 
 type statFunc func(string) (os.FileInfo, error)
 type globFunc func(string) ([]string, error)
@@ -30,7 +34,7 @@ type iscsiSession struct {
 	Name     string
 }
 
-//Connector is blah
+//Connector provides a struct to hold all of the needed parameters to make our iscsi connection
 type Connector struct {
 	VolumeName       string
 	TargetIqn        string
@@ -42,6 +46,12 @@ type Connector struct {
 	SessionSecrets   secrets
 	Interface        string
 	Multipath        bool
+}
+
+func init() {
+	// TODO: add a handle to configure loggers after init
+	// also, make default for trace to go to discard when you're done messing around
+	log = logger.NewLogger(os.Stdout, os.Stdout, os.Stdout, os.Stderr)
 }
 
 func runCmd(cmd string, args ...string) (string, error) {
@@ -79,20 +89,17 @@ func parseSessions(lines string) ([]iscsiSession, error) {
 
 func sessionExists(tgtPortal, tgtIQN string) (bool, error) {
 	sessions, err := getCurrentSessions()
-	fmt.Printf("current sessions: %s\n", sessions)
 	if err != nil {
-		fmt.Printf("huh... error in getsessions: %s\n", err.Error())
+		log.Error.Printf("failed to get sessions: %s\n", err.Error())
 		return false, err
 	}
 	var existingSessions []iscsiSession
 	for _, s := range sessions {
-		fmt.Printf("Looking for session:\n  %s:%s\n  %s:%s\n", tgtIQN, s.IQN, tgtPortal, s.Portal)
 		if tgtIQN == s.IQN && tgtPortal == s.Portal {
 			existingSessions = append(existingSessions, s)
 		}
 	}
 	exists := false
-	fmt.Printf("leng of existing sessions: %s\n", len(existingSessions))
 	if len(existingSessions) > 0 {
 		exists = true
 	}
@@ -187,7 +194,7 @@ func getMultipathDisk(path string) (string, error) {
 				// We've found a matching entry, return the path for the
 				// dm-* device it was found under
 				p := filepath.Join("/dev", filepath.Base(dmpath))
-				fmt.Printf("Found matching device: %s under dm-* device path %s", sdevice, dmpath)
+				log.Trace.Printf("Found matching device: %s under dm-* device path %s", sdevice, dmpath)
 				return p, nil
 			}
 		}
@@ -207,13 +214,13 @@ func Connect(c Connector) (string, error) {
 	// make sure our iface exists and extract the transport type
 	out, err := runCmd("iscsiadm", "-m", "iface", "-I", iFace, "-o", "show")
 	if err != nil {
-		fmt.Printf("error in iface show: %s\n", err.Error())
+		log.Error.Printf("error in iface show: %s\n", err.Error())
 		return "", err
 	}
 	iscsiTransport := extractTransportName(out)
 
 	for _, p := range c.TargetPortals {
-		fmt.Printf("process portal: %s\n", p)
+		log.Trace.Printf("process portal: %s\n", p)
 		baseArgs := []string{"-m", "node", "-T", c.TargetIqn, "-p", p}
 
 		// create our devicePath that we'll be looking for based on the transport being used
@@ -225,8 +232,9 @@ func Connect(c Connector) (string, error) {
 		// TODO: first make sure we're not already connected/logged in
 		exists, _ := sessionExists(p, c.TargetIqn)
 		if exists {
-			fmt.Println("Already logged in, check for device path...")
+			log.Info.Printf("found a session, check for device path: %s", devicePath)
 			if waitForPathToExist(&devicePath, 1, iscsiTransport) {
+				log.Info.Printf("found device path: %s", devicePath)
 				devicePaths = append(devicePaths, devicePath)
 				continue
 			}
@@ -234,13 +242,13 @@ func Connect(c Connector) (string, error) {
 
 		// create db entry
 		args := append(baseArgs, []string{"-I", iFace, "-o", "new"}...)
-		fmt.Printf("create the new record: %s\n", args)
+		log.Trace.Printf("create the new record: %s\n", args)
 		out, err := runCmd("iscsiadm", args...)
 		if err != nil {
-			fmt.Printf("error: %s\n", err.Error())
+			log.Error.Printf("error: %s\n", err.Error())
 			continue
 		}
-		fmt.Printf("output from new: %s\n", out)
+		log.Trace.Printf("output from new: %s\n", out)
 		if c.AuthType == "chap" {
 			args = append(baseArgs, []string{"-o", "update",
 				"-n", "node.session.auth.authmethod", "-v", "CHAP",
@@ -257,10 +265,14 @@ func Connect(c Connector) (string, error) {
 		// perform the login
 		args = append(baseArgs, []string{"-l"}...)
 		runCmd("iscsiadm", args...)
+		if waitForPathToExist(&devicePath, 1, iscsiTransport) {
+			devicePaths = append(devicePaths, devicePath)
+			continue
+		}
 
 	}
 
-	return "", nil
+	return devicePaths[0], nil
 }
 
 //Disconnect performs a disconnect operation on a volume
