@@ -264,9 +264,22 @@ func Connect(c Connector) (string, error) {
 		// perform the login
 		args = append(baseArgs, []string{"-l"}...)
 		runCmd("iscsiadm", args...)
-		if waitForPathToExist(&devicePath, 1, iscsiTransport) {
+		if waitForPathToExist(&devicePath, 10, iscsiTransport) {
 			devicePaths = append(devicePaths, devicePath)
 			continue
+		}
+		devicePath = devicePaths[0]
+		for _, path := range devicePaths {
+			if path != "" {
+				if mappedDevicePath, err := getMultipathDisk(path); mappedDevicePath != "" {
+					devicePath = mappedDevicePath
+					if err != nil {
+						log.Error.Printf("failed to get multipath device path for `%s:` %s", path, err.Error())
+						return "", err
+					}
+					break
+				}
+			}
 		}
 
 	}
@@ -280,10 +293,17 @@ func Disconnect(tgtIqn string, portals []string) error {
 	baseArgs := []string{"-m", "node", "-T", tgtIqn}
 	for _, p := range portals {
 		args := append(baseArgs, []string{"-p", p, "-u"}...)
-		runCmd("iscsiadm", args...)
+		_, err := runCmd("iscsiadm", args...)
+		if err != nil {
+			log.Error.Printf("failed to disconnect portal %s: %s", p, err.Error())
+			return err
+		}
 	}
 	// finally, delete the entry
 	args := append(baseArgs, []string{"-o", "delete"}...)
-	runCmd("iscsiadm", args...)
-	return nil
+	_, err := runCmd("iscsiadm", args...)
+	if err != nil {
+		log.Error.Printf("failed to delete connection to target `%s`: %s", tgtIqn, err.Error())
+	}
+	return err
 }

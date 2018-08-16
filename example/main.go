@@ -1,7 +1,10 @@
 package main
 
 import (
+	"fmt"
 	"log"
+	"os/exec"
+	"time"
 
 	"github.com/j-griffith/csi-connectors/iscsi"
 )
@@ -18,7 +21,13 @@ func main() {
 	log.Printf("path is: %s\n", path)
 	if err != nil {
 		log.Printf("err is: %s\n", err.Error())
-
 	}
+	time.Sleep(3 * 100 * time.Millisecond)
+	out, _ := exec.Command("ls /dev/disk/by-path/").CombinedOutput()
+	fmt.Printf("disk by path: %s\n", out)
+	iscsi.Disconnect(c.TargetIqn, c.TargetPortals)
+	time.Sleep(3 * 100 * time.Millisecond)
+	fmt.Printf("disk by path: %s\n", out)
+	out, _ = exec.Command("ls /dev/disk/by-path/").CombinedOutput()
 
 }
