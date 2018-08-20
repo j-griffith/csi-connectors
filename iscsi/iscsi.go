@@ -14,7 +14,10 @@ import (
 	"github.com/j-griffith/csi-connectors/logger"
 )
 
-var log *logger.Logger
+var (
+	log         *logger.Logger
+	execCommand = exec.Command
+)
 
 type statFunc func(string) (os.FileInfo, error)
 type globFunc func(string) ([]string, error)
@@ -55,11 +58,12 @@ func init() {
 }
 
 func runCmd(cmd string, args ...string) (string, error) {
-	out, err := exec.Command(cmd, args...).CombinedOutput()
+	c := execCommand(cmd, args...)
+	out, err := c.CombinedOutput()
 	return string(out), err
 }
 
-func parseSessions(lines string) ([]iscsiSession, error) {
+func parseSessions(lines string) []iscsiSession {
 	entries := strings.Split(strings.TrimSpace(string(lines)), "\n")
 	r := strings.NewReplacer("[", "",
 		"]", "")
@@ -70,7 +74,7 @@ func parseSessions(lines string) ([]iscsiSession, error) {
 		if len(e) < 4 {
 			continue
 		}
-		protocol := e[0]
+		protocol := strings.Split(e[0], ":")[0]
 		id := r.Replace(e[1])
 		id64, _ := strconv.ParseInt(id, 10, 32)
 		portal := strings.Split(e[2], ",")[0]
@@ -84,7 +88,7 @@ func parseSessions(lines string) ([]iscsiSession, error) {
 		}
 		sessions = append(sessions, s)
 	}
-	return sessions, nil
+	return sessions
 }
 
 func sessionExists(tgtPortal, tgtIQN string) (bool, error) {
@@ -111,13 +115,14 @@ func extractTransportName(output string) string {
 	if res == nil {
 		return ""
 	}
-	if res[1] == "<empty>" {
+	if res[1] == "" {
 		return "tcp"
 	}
 	return res[1]
 }
 
 func getCurrentSessions() ([]iscsiSession, error) {
+
 	out, err := runCmd("iscsiadm", "-m", "session")
 	if err != nil {
 		exitErr, ok := err.(*exec.ExitError)
@@ -126,7 +131,7 @@ func getCurrentSessions() ([]iscsiSession, error) {
 		}
 		return nil, err
 	}
-	session, err := parseSessions(out)
+	session := parseSessions(out)
 	return session, err
 }
 
