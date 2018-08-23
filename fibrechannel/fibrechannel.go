@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"fmt"
 	"strings"
+	"path"
 )
 
 var log *logger.Logger
@@ -183,8 +184,7 @@ func findDiskWWIDs(wwid string) (string, string) {
 	return "", ""
 }
 
-
-// Connect attempts to connect a volume to this node using the provided Connector info
+// Connect attempts to connect a fc volume to this node using the provided Connector info
 func Connect(c Connector) (string, error) {
 	devicePath, err := searchDisk(c)
 
@@ -195,3 +195,76 @@ func Connect(c Connector) (string, error) {
 
 	return devicePath, nil
 }
+
+func Disconnect(c Connector, devicePath string) error {
+	var devices []string
+	dstPath, err := filepath.EvalSymlinks(devicePath)
+
+	if err != nil {
+		return err
+	}
+
+	if strings.HasPrefix(dstPath, "/dev/dm-") {
+		devices = FindSlaveDevicesOnMultipath(dstPath)
+	} else {
+		// Add single devicepath to devices
+		devices = append(devices, dstPath)
+	}
+
+	log.Trace.Printf("fc: DetachDisk devicePath: %v, dstPath: %v, devices: %v", devicePath, dstPath, devices)
+
+	var lastErr error
+
+	for _, device := range devices {
+		err := detachFCDisk(device)
+		if err != nil {
+			log.Error.Printf("fc: detachFCDisk failed. device: %v err: %v", device, err)
+			lastErr = fmt.Errorf("fc: detachFCDisk failed. device: %v err: %v", device, err)
+		}
+	}
+
+	if lastErr != nil {
+		log.Error.Printf("fc: last error occurred during detach disk:\n%v", lastErr)
+		return lastErr
+	}
+
+	return nil
+}
+
+func FindSlaveDevicesOnMultipath(dm string) []string {
+	var devices []string
+	// Split path /dev/dm-1 into "", "dev", "dm-1"
+	parts := strings.Split(dm, "/")
+	if len(parts) != 3 || !strings.HasPrefix(parts[1], "dev") {
+		return devices
+	}
+	disk := parts[2]
+	slavesPath := path.Join("/sys/block/", disk, "/slaves/")
+	if files, err := ioutil.ReadDir(slavesPath); err == nil {
+		for _, f := range files {
+			devices = append(devices, path.Join("/dev/", f.Name()))
+		}
+	}
+	return devices
+}
+
+// detachFCDisk removes scsi device file such as /dev/sdX from the node.
+func detachFCDisk(devicePath string) error {
+	// Remove scsi device from the node.
+	if !strings.HasPrefix(devicePath, "/dev/") {
+		return fmt.Errorf("fc detach disk: invalid device name: %s", devicePath)
+	}
+	arr := strings.Split(devicePath, "/")
+	dev := arr[len(arr)-1]
+	removeFromScsiSubsystem(dev)
+	return nil
+}
+
+// Removes a scsi device based upon /dev/sdX name
+func removeFromScsiSubsystem(deviceName string) {
+	fileName := "/sys/block/" + deviceName + "/device/delete"
+	log.Trace.Printf("fc: remove device from scsi-subsystem: path: %s", fileName)
+	data := []byte("1")
+	ioutil.WriteFile(fileName, data, 0666)
+}
+
