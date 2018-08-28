@@ -22,7 +22,7 @@ type Connector struct {
 	WWIDs            []string
 }
 
-type fcMounter struct {
+type FCMounter struct {
 	readOnly bool
 	fsType string
 	mountOptions []string
@@ -274,7 +274,7 @@ func removeFromScsiSubsystem(deviceName string) {
 	ioutil.WriteFile(fileName, data, 0666)
 }
 
-func mountDisk(mnter fcMounter, devicePath string) (error){
+func MountDisk(mnter FCMounter, devicePath string) (error){
 	mntPath := mnter.targetPath
 	notMnt, err := mnter.mounter.IsLikelyNotMountPoint(mntPath)
 
