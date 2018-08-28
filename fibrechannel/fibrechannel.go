@@ -3,12 +3,13 @@ package fibrechannel
 import (
 	"github.com/j-griffith/csi-connectors/logger"
 	"os"
-	"os/exec"
-	"io/ioutil"
+		"io/ioutil"
 	"path/filepath"
 	"fmt"
 	"strings"
 	"path"
+	"k8s.io/kubernetes/pkg/util/mount"
+	volumeutil "k8s.io/kubernetes/pkg/volume/util"
 )
 
 var log *logger.Logger
@@ -21,15 +22,20 @@ type Connector struct {
 	WWIDs            []string
 }
 
+type fcMounter struct {
+	readOnly bool
+	fsType string
+	mountOptions []string
+	mounter *mount.SafeFormatAndMount
+	exec mount.Exec
+	deviceUtil volumeutil.DeviceUtil
+	targetPath string
+}
+
 func init() {
 	// TODO: add a handle to configure loggers after init
 	// also, make default for trace to go to discard when you're done messing around
 	log = logger.NewLogger(os.Stdout, os.Stdout, os.Stdout, os.Stderr)
-}
-
-func runCmd(cmd string, args ...string) (string, error) {
-	out, err := exec.Command(cmd, args...).CombinedOutput()
-	return string(out), err
 }
 
 func getMultipathDisk(path string) (string, error) {
@@ -268,3 +274,21 @@ func removeFromScsiSubsystem(deviceName string) {
 	ioutil.WriteFile(fileName, data, 0666)
 }
 
+func mountDisk(mnter fcMounter, devicePath string) (error){
+	mntPath := mnter.targetPath
+	notMnt, err := mnter.mounter.IsLikelyNotMountPoint(mntPath)
+
+	if err != nil {
+		return fmt.Errorf("Heuristic determination of mount point failed: %v", err)
+	}
+
+	if !notMnt{
+		log.Trace.Printf("fc: %s already mounted", mnter.targetPath)
+	}
+
+	if err = mnter.mounter.FormatAndMount(devicePath, mnter.targetPath, mnter.fsType, nil); err != nil {
+		return fmt.Errorf("fc: failed to mount fc volume %s [%s] to %s, error %v", devicePath, mnter.fsType, mnter.targetPath, err)
+	}
+
+	return nil
+}
