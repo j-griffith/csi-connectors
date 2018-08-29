@@ -274,19 +274,19 @@ func removeFromScsiSubsystem(deviceName string) {
 }
 
 func MountDisk(mnter FCMounter, devicePath string) error {
-	mntPath := mnter.targetPath
-	notMnt, err := mnter.mounter.IsLikelyNotMountPoint(mntPath)
+	mntPath := mnter.TargetPath
+	notMnt, err := mnter.Mounter.IsLikelyNotMountPoint(mntPath)
 
 	if err != nil {
 		return fmt.Errorf("Heuristic determination of mount point failed: %v", err)
 	}
 
 	if !notMnt {
-		log.Trace.Printf("fc: %s already mounted", mnter.targetPath)
+		log.Trace.Printf("fc: %s already mounted", mnter.TargetPath)
 	}
 
-	if err = mnter.mounter.FormatAndMount(devicePath, mnter.targetPath, mnter.fsType, nil); err != nil {
-		return fmt.Errorf("fc: failed to mount fc volume %s [%s] to %s, error %v", devicePath, mnter.fsType, mnter.targetPath, err)
+	if err = mnter.Mounter.FormatAndMount(devicePath, mnter.TargetPath, mnter.FsType, nil); err != nil {
+		return fmt.Errorf("fc: failed to mount fc volume %s [%s] to %s, error %v", devicePath, mnter.FsType, mnter.TargetPath, err)
 	}
 
 	return nil
