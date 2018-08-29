@@ -1,35 +1,35 @@
 package fibrechannel
 
 import (
-	"github.com/j-griffith/csi-connectors/logger"
-	"os"
-		"io/ioutil"
-	"path/filepath"
 	"fmt"
-	"strings"
-	"path"
+	"github.com/j-griffith/csi-connectors/logger"
+	"io/ioutil"
 	"k8s.io/kubernetes/pkg/util/mount"
 	volumeutil "k8s.io/kubernetes/pkg/volume/util"
+	"os"
+	"path"
+	"path/filepath"
+	"strings"
 )
 
 var log *logger.Logger
 
 //Connector provides a struct to hold all of the needed parameters to make our fibrechannel connection
 type Connector struct {
-	VolumeName       string
-	TargetWWNs       []string
-	Lun              string
-	WWIDs            []string
+	VolumeName string
+	TargetWWNs []string
+	Lun        string
+	WWIDs      []string
 }
 
 type FCMounter struct {
-	ReadOnly bool
-	FsType string
+	ReadOnly     bool
+	FsType       string
 	MountOptions []string
-	Mounter *mount.SafeFormatAndMount
-	Exec mount.Exec
-	DeviceUtil volumeutil.DeviceUtil
-	TargetPath string
+	Mounter      *mount.SafeFormatAndMount
+	Exec         mount.Exec
+	DeviceUtil   volumeutil.DeviceUtil
+	TargetPath   string
 }
 
 func init() {
@@ -82,7 +82,7 @@ func scsiHostRescan() {
 	}
 }
 
-func searchDisk(c Connector) (string, error){
+func searchDisk(c Connector) (string, error) {
 	var diskIds []string
 	var disk string
 	var dm string
@@ -133,7 +133,6 @@ func searchDisk(c Connector) (string, error){
 	return disk, nil
 }
 
-
 // given a wwn and lun, find the device and associated devicemapper parent
 func findDisk(wwn, lun string) (string, string) {
 	FC_PATH := "-fc-0x" + wwn + "-lun-" + lun
@@ -178,7 +177,7 @@ func findDiskWWIDs(wwid string) (string, string) {
 					return "", ""
 				}
 				dm, err1 := getMultipathDisk(DEV_ID + name)
-				if err1 == nil{
+				if err1 == nil {
 					log.Trace.Printf("fc: find disk: %v, dm: %v", disk, dm)
 					return disk, dm
 				}
@@ -274,7 +273,7 @@ func removeFromScsiSubsystem(deviceName string) {
 	ioutil.WriteFile(fileName, data, 0666)
 }
 
-func MountDisk(mnter FCMounter, devicePath string) (error){
+func MountDisk(mnter FCMounter, devicePath string) error {
 	mntPath := mnter.targetPath
 	notMnt, err := mnter.mounter.IsLikelyNotMountPoint(mntPath)
 
@@ -282,7 +281,7 @@ func MountDisk(mnter FCMounter, devicePath string) (error){
 		return fmt.Errorf("Heuristic determination of mount point failed: %v", err)
 	}
 
-	if !notMnt{
+	if !notMnt {
 		log.Trace.Printf("fc: %s already mounted", mnter.targetPath)
 	}
 
