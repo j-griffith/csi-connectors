@@ -23,13 +23,13 @@ type Connector struct {
 }
 
 type FCMounter struct {
-	readOnly bool
-	fsType string
-	mountOptions []string
-	mounter *mount.SafeFormatAndMount
-	exec mount.Exec
-	deviceUtil volumeutil.DeviceUtil
-	targetPath string
+	ReadOnly bool
+	FsType string
+	MountOptions []string
+	Mounter *mount.SafeFormatAndMount
+	Exec mount.Exec
+	DeviceUtil volumeutil.DeviceUtil
+	TargetPath string
 }
 
 func init() {
