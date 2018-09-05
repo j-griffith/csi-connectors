@@ -149,6 +149,10 @@ func waitForPathToExistImpl(devicePath *string, maxRetries int, deviceTransport 
 		var err error
 		if deviceTransport == "tcp" {
 			_, err = osStat(*devicePath)
+			if err != nil {
+				log.Trace.Printf("Stat: %s", err.Error())
+			}
+
 		} else {
 			fpath, _ := filepathGlob(*devicePath)
 			if fpath == nil {
@@ -228,6 +232,9 @@ func Connect(c Connector) (string, error) {
 		baseArgs := []string{"-m", "node", "-T", c.TargetIqn, "-p", p}
 
 		// create our devicePath that we'll be looking for based on the transport being used
+		if c.Port != "" {
+			p = strings.Join([]string{p, c.Port}, ":")
+		}
 		devicePath := strings.Join([]string{"/dev/disk/by-path/ip", p, "iscsi", c.TargetIqn, "lun", fmt.Sprint(c.Lun)}, "-")
 		if iscsiTransport != "tcp" {
 			devicePath = strings.Join([]string{"/dev/disk/by-path/pci", "*", "ip", p, "iscsi", c.TargetIqn, "lun", fmt.Sprint(c.Lun)}, "-")
@@ -273,6 +280,7 @@ func Connect(c Connector) (string, error) {
 			devicePaths = append(devicePaths, devicePath)
 			continue
 		}
+		log.Trace.Printf("Device Paths: %s", devicePaths)
 		devicePath = devicePaths[0]
 		for _, path := range devicePaths {
 			if path != "" {
