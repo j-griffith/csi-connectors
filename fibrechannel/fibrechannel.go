@@ -193,6 +193,7 @@ func findDiskWWIDs(wwid string) (string, string) {
 
 // Connect attempts to connect a fc volume to this node using the provided Connector info
 func Connect(c Connector) (string, error) {
+	log.Trace.Printf("Connecting fibre channel volume")
 	devicePath, err := searchDisk(c)
 
 	if err != nil {
@@ -205,6 +206,7 @@ func Connect(c Connector) (string, error) {
 
 // Disconnect performs a disconnect operation on a volume
 func Disconnect(devicePath string) error {
+	log.Trace.Printf("Disconnecting fibre channel volume")
 	var devices []string
 	dstPath, err := filepath.EvalSymlinks(devicePath)
 
