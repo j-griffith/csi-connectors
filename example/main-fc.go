@@ -1,11 +1,11 @@
 package main
 
 import (
-	"github.com/mathu97/csi-connectors/fibrechannel"
-		"log"
-	"time"
-	"os/exec"
 	"fmt"
+	"github.com/mathu97/csi-connectors/fibrechannel"
+	"log"
+	"os/exec"
+	"time"
 )
 
 func main() {
@@ -22,7 +22,7 @@ func main() {
 	time.Sleep(3 * 100 * time.Millisecond)
 	out, _ := exec.Command("ls /dev/disk/by-path/").CombinedOutput()
 	fmt.Printf("disk by path: %s\n", out)
-	fibrechannel.Disconnect(c, dp)
+	fibrechannel.Disconnect(dp)
 	fmt.Printf("disk by path: %s\n", out)
 	out, _ = exec.Command("ls /dev/disk/by-path/").CombinedOutput()
 }

@@ -15,7 +15,7 @@ import (
 
 var log *logger.Logger
 
-//Connector provides a struct to hold all of the needed parameters to make our fibrechannel connection
+//Connector provides a struct to hold all of the needed parameters to make our Fibre Channel connection
 type Connector struct {
 	VolumeName string
 	TargetWWNs []string
@@ -23,6 +23,7 @@ type Connector struct {
 	WWIDs      []string
 }
 
+//FCMounter struct holds required parameters to mount a Fibre Channel Disk
 type FCMounter struct {
 	ReadOnly     bool
 	FsType       string
@@ -73,10 +74,10 @@ func getMultipathDisk(path string) (string, error) {
 }
 
 func scsiHostRescan() {
-	scsi_path := "/sys/class/scsi_host/"
-	if dirs, err := ioutil.ReadDir(scsi_path); err == nil {
+	scsiPath := "/sys/class/scsi_host/"
+	if dirs, err := ioutil.ReadDir(scsiPath); err == nil {
 		for _, f := range dirs {
-			name := scsi_path + f.Name() + "/scan"
+			name := scsiPath + f.Name() + "/scan"
 			data := []byte("- - -")
 			ioutil.WriteFile(name, data, 0666)
 		}
@@ -100,11 +101,11 @@ func searchDisk(c Connector) (string, error) {
 	// otherwise, in second phase, rescan scsi bus and search again, return with any findings
 	for true {
 
-		for _, diskId := range diskIds {
+		for _, diskID := range diskIds {
 			if len(c.TargetWWNs) != 0 {
-				disk, dm = findDisk(diskId, c.Lun)
+				disk, dm = findDisk(diskID, c.Lun)
 			} else {
-				disk, dm = findDiskWWIDs(diskId)
+				disk, dm = findDiskWWIDs(diskID)
 			}
 			// if multipath device is found, break
 			if dm != "" {
@@ -136,14 +137,14 @@ func searchDisk(c Connector) (string, error) {
 
 // given a wwn and lun, find the device and associated devicemapper parent
 func findDisk(wwn, lun string) (string, string) {
-	FC_PATH := "-fc-0x" + wwn + "-lun-" + lun
-	DEV_PATH := "/dev/disk/by-path/"
-	if dirs, err := ioutil.ReadDir(DEV_PATH); err == nil {
+	FcPath := "-fc-0x" + wwn + "-lun-" + lun
+	DevPath := "/dev/disk/by-path/"
+	if dirs, err := ioutil.ReadDir(DevPath); err == nil {
 		for _, f := range dirs {
 			name := f.Name()
-			if strings.Contains(name, FC_PATH) {
-				if disk, err1 := filepath.EvalSymlinks(DEV_PATH + name); err1 == nil {
-					dm, err2 := getMultipathDisk(DEV_PATH + name)
+			if strings.Contains(name, FcPath) {
+				if disk, err1 := filepath.EvalSymlinks(DevPath + name); err1 == nil {
+					dm, err2 := getMultipathDisk(DevPath + name)
 					if err2 == nil {
 						log.Trace.Printf("fc: find disk: %v, dm: %v", disk, dm)
 						return disk, dm
@@ -166,18 +167,18 @@ func findDiskWWIDs(wwid string) (string, string) {
 	// The wwid could contain white space and it will be replaced
 	// underscore when wwid is exposed under /dev/by-id.
 
-	FC_PATH := "scsi-" + wwid
-	DEV_ID := "/dev/disk/by-id/"
-	if dirs, err := ioutil.ReadDir(DEV_ID); err == nil {
+	FcPath := "scsi-" + wwid
+	DevID := "/dev/disk/by-id/"
+	if dirs, err := ioutil.ReadDir(DevID); err == nil {
 		for _, f := range dirs {
 			name := f.Name()
-			if name == FC_PATH {
-				disk, err := filepath.EvalSymlinks(DEV_ID + name)
+			if name == FcPath {
+				disk, err := filepath.EvalSymlinks(DevID + name)
 				if err != nil {
-					log.Error.Printf("fc: failed to find a corresponding disk from symlink[%s], error %v", DEV_ID+name, err)
+					log.Error.Printf("fc: failed to find a corresponding disk from symlink[%s], error %v", DevID+name, err)
 					return "", ""
 				}
-				dm, err1 := getMultipathDisk(DEV_ID + name)
+				dm, err1 := getMultipathDisk(DevID + name)
 				if err1 == nil {
 					log.Trace.Printf("fc: find disk: %v, dm: %v", disk, dm)
 					return disk, dm
@@ -186,7 +187,7 @@ func findDiskWWIDs(wwid string) (string, string) {
 			}
 		}
 	}
-	log.Error.Printf("fc: failed to find a disk [%s]", DEV_ID+FC_PATH)
+	log.Error.Printf("fc: failed to find a disk [%s]", DevID+FcPath)
 	return "", ""
 }
 
@@ -202,7 +203,8 @@ func Connect(c Connector) (string, error) {
 	return devicePath, nil
 }
 
-func Disconnect(c Connector, devicePath string) error {
+// Disconnect performs a disconnect operation on a volume
+func Disconnect(devicePath string) error {
 	var devices []string
 	dstPath, err := filepath.EvalSymlinks(devicePath)
 
@@ -237,6 +239,7 @@ func Disconnect(c Connector, devicePath string) error {
 	return nil
 }
 
+//FindSlaveDevicesOnMultipath returns all slaves on the multipath device given the device path
 func FindSlaveDevicesOnMultipath(dm string) []string {
 	var devices []string
 	// Split path /dev/dm-1 into "", "dev", "dm-1"
@@ -274,6 +277,7 @@ func removeFromScsiSubsystem(deviceName string) {
 	ioutil.WriteFile(fileName, data, 0666)
 }
 
+//MountDisk mounts the fibre channel disk with the given parameters
 func MountDisk(mnter FCMounter, devicePath string) error {
 	mntPath := mnter.TargetPath
 	notMnt, err := mnter.Mounter.IsLikelyNotMountPoint(mntPath)
