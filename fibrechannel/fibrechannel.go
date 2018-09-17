@@ -4,8 +4,6 @@ import (
 	"fmt"
 	"github.com/j-griffith/csi-connectors/logger"
 	"io/ioutil"
-	"k8s.io/kubernetes/pkg/util/mount"
-	volumeutil "k8s.io/kubernetes/pkg/volume/util"
 	"os"
 
 	"path"
@@ -21,17 +19,6 @@ type Connector struct {
 	TargetWWNs []string
 	Lun        string
 	WWIDs      []string
-}
-
-//FCMounter struct holds required parameters to mount a Fibre Channel Disk
-type FCMounter struct {
-	ReadOnly     bool
-	FsType       string
-	MountOptions []string
-	Mounter      *mount.SafeFormatAndMount
-	Exec         mount.Exec
-	DeviceUtil   volumeutil.DeviceUtil
-	TargetPath   string
 }
 
 func init() {
@@ -277,24 +264,4 @@ func removeFromScsiSubsystem(deviceName string) {
 	log.Trace.Printf("fc: remove device from scsi-subsystem: path: %s", fileName)
 	data := []byte("1")
 	ioutil.WriteFile(fileName, data, 0666)
-}
-
-//MountDisk mounts the fibre channel disk with the given parameters
-func MountDisk(mnter FCMounter, devicePath string) error {
-	mntPath := mnter.TargetPath
-	notMnt, err := mnter.Mounter.IsLikelyNotMountPoint(mntPath)
-
-	if err != nil {
-		return fmt.Errorf("Heuristic determination of mount point failed: %v", err)
-	}
-
-	if !notMnt {
-		log.Trace.Printf("fc: %s already mounted", mnter.TargetPath)
-	}
-
-	if err = mnter.Mounter.FormatAndMount(devicePath, mnter.TargetPath, mnter.FsType, nil); err != nil {
-		return fmt.Errorf("fc: failed to mount fc volume %s [%s] to %s, error %v", devicePath, mnter.FsType, mnter.TargetPath, err)
-	}
-
-	return nil
 }
