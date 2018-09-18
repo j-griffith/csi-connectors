@@ -6,6 +6,7 @@ import (
 	"io/ioutil"
 	"os"
 
+	"errors"
 	"path"
 	"path/filepath"
 	"strings"
@@ -13,12 +14,36 @@ import (
 
 var log *logger.Logger
 
+type ioHandler interface {
+	ReadDir(dirname string) ([]os.FileInfo, error)
+	Lstat(name string) (os.FileInfo, error)
+	EvalSymlinks(path string) (string, error)
+	WriteFile(filename string, data []byte, perm os.FileMode) error
+}
+
 //Connector provides a struct to hold all of the needed parameters to make our Fibre Channel connection
 type Connector struct {
 	VolumeName string
 	TargetWWNs []string
 	Lun        string
 	WWIDs      []string
+	io         ioHandler
+}
+
+//This struct is a wrapper that includes all the necessary io functions used for
+type osIOHandler struct{}
+
+func (handler *osIOHandler) ReadDir(dirname string) ([]os.FileInfo, error) {
+	return ioutil.ReadDir(dirname)
+}
+func (handler *osIOHandler) Lstat(name string) (os.FileInfo, error) {
+	return os.Lstat(name)
+}
+func (handler *osIOHandler) EvalSymlinks(path string) (string, error) {
+	return filepath.EvalSymlinks(path)
+}
+func (handler *osIOHandler) WriteFile(filename string, data []byte, perm os.FileMode) error {
+	return ioutil.WriteFile(filename, data, perm)
 }
 
 func init() {
@@ -27,51 +52,54 @@ func init() {
 	log = logger.NewLogger(os.Stdout, os.Stdout, os.Stdout, os.Stderr)
 }
 
-func getMultipathDisk(path string) (string, error) {
-	// Follow link to destination directory
-	devicePath, err := os.Readlink(path)
+// FindMultipathDeviceForDevice given a device name like /dev/sdx, find the devicemapper parent
+func FindMultipathDeviceForDevice(device string, io ioHandler) string {
+	disk, err := findDeviceForPath(device, io)
 	if err != nil {
-		log.Error.Printf("failed reading link: %s -- error: %s\n", path, err.Error())
-		return "", err
+		return ""
 	}
-	sdevice := filepath.Base(devicePath)
-	// If destination directory is already identified as a multipath device,
-	// just return its path
-	if strings.HasPrefix(sdevice, "dm-") {
-		return path, nil
-	}
-	// Fallback to iterating through all the entries under /sys/block/dm-* and
-	// check to see if any have an entry under /sys/block/dm-*/slaves matching
-	// the device the symlink was pointing at
-	dmpaths, _ := filepath.Glob("/sys/block/dm-*")
-	for _, dmpath := range dmpaths {
-		sdevices, _ := filepath.Glob(filepath.Join(dmpath, "slaves", "*"))
-		for _, spath := range sdevices {
-			s := filepath.Base(spath)
-			if sdevice == s {
-				// We've found a matching entry, return the path for the
-				// dm-* device it was found under
-				p := filepath.Join("/dev", filepath.Base(dmpath))
-				log.Trace.Printf("Found matching device: %s under dm-* device path %s", sdevice, dmpath)
-				return p, nil
+	sysPath := "/sys/block/"
+	if dirs, err := io.ReadDir(sysPath); err == nil {
+		for _, f := range dirs {
+			name := f.Name()
+			if strings.HasPrefix(name, "dm-") {
+				if _, err1 := io.Lstat(sysPath + name + "/slaves/" + disk); err1 == nil {
+					return "/dev/" + name
+				}
 			}
 		}
 	}
-	return "", fmt.Errorf("Couldn't find dm-* path for path: %s, found non dm-* path: %s", path, devicePath)
+	return ""
 }
 
-func scsiHostRescan() {
+// findDeviceForPath Find the underlaying disk for a linked path such as /dev/disk/by-path/XXXX or /dev/mapper/XXXX
+// will return sdX or hdX etc, if /dev/sdX is passed in then sdX will be returned
+func findDeviceForPath(path string, io ioHandler) (string, error) {
+	devicePath, err := io.EvalSymlinks(path)
+	if err != nil {
+		return "", err
+	}
+	// if path /dev/hdX split into "", "dev", "hdX" then we will
+	// return just the last part
+	parts := strings.Split(devicePath, "/")
+	if len(parts) == 3 && strings.HasPrefix(parts[1], "dev") {
+		return parts[2], nil
+	}
+	return "", errors.New("Illegal path for device " + devicePath)
+}
+
+func scsiHostRescan(io ioHandler) {
 	scsiPath := "/sys/class/scsi_host/"
-	if dirs, err := ioutil.ReadDir(scsiPath); err == nil {
+	if dirs, err := io.ReadDir(scsiPath); err == nil {
 		for _, f := range dirs {
 			name := scsiPath + f.Name() + "/scan"
 			data := []byte("- - -")
-			ioutil.WriteFile(name, data, 0666)
+			io.WriteFile(name, data, 0666)
 		}
 	}
 }
 
-func searchDisk(c Connector) (string, error) {
+func searchDisk(c Connector, io ioHandler) (string, error) {
 	var diskIds []string
 	var disk string
 	var dm string
@@ -90,9 +118,9 @@ func searchDisk(c Connector) (string, error) {
 
 		for _, diskID := range diskIds {
 			if len(c.TargetWWNs) != 0 {
-				disk, dm = findDisk(diskID, c.Lun)
+				disk, dm = findDisk(diskID, c.Lun, io)
 			} else {
-				disk, dm = findDiskWWIDs(diskID)
+				disk, dm = findDiskWWIDs(diskID, io)
 			}
 			// if multipath device is found, break
 			if dm != "" {
@@ -106,7 +134,7 @@ func searchDisk(c Connector) (string, error) {
 		}
 		// rescan and search again
 		// rescan scsi bus
-		scsiHostRescan()
+		scsiHostRescan(io)
 		rescaned = true
 	}
 	// if no disk matches input wwn and lun, exit
@@ -123,19 +151,17 @@ func searchDisk(c Connector) (string, error) {
 }
 
 // given a wwn and lun, find the device and associated devicemapper parent
-func findDisk(wwn, lun string) (string, string) {
+func findDisk(wwn, lun string, io ioHandler) (string, string) {
 	FcPath := "-fc-0x" + wwn + "-lun-" + lun
 	DevPath := "/dev/disk/by-path/"
-	if dirs, err := ioutil.ReadDir(DevPath); err == nil {
+	if dirs, err := io.ReadDir(DevPath); err == nil {
 		for _, f := range dirs {
 			name := f.Name()
 			if strings.Contains(name, FcPath) {
-				if disk, err1 := filepath.EvalSymlinks(DevPath + name); err1 == nil {
-					dm, err2 := getMultipathDisk(DevPath + name)
-					if err2 == nil {
-						log.Trace.Printf("fc: find disk: %v, dm: %v", disk, dm)
-						return disk, dm
-					}
+
+				if disk, err1 := io.EvalSymlinks(DevPath + name); err1 == nil {
+					dm := FindMultipathDeviceForDevice(disk, io)
+					return disk, dm
 				}
 			}
 		}
@@ -144,7 +170,7 @@ func findDisk(wwn, lun string) (string, string) {
 }
 
 // given a wwid, find the device and associated devicemapper parent
-func findDiskWWIDs(wwid string) (string, string) {
+func findDiskWWIDs(wwid string, io ioHandler) (string, string) {
 	// Example wwid format:
 	//   3600508b400105e210000900000490000
 	//   <VENDOR NAME> <IDENTIFIER NUMBER>
@@ -156,21 +182,17 @@ func findDiskWWIDs(wwid string) (string, string) {
 
 	FcPath := "scsi-" + wwid
 	DevID := "/dev/disk/by-id/"
-	if dirs, err := ioutil.ReadDir(DevID); err == nil {
+	if dirs, err := io.ReadDir(DevID); err == nil {
 		for _, f := range dirs {
 			name := f.Name()
 			if name == FcPath {
-				disk, err := filepath.EvalSymlinks(DevID + name)
+				disk, err := io.EvalSymlinks(DevID + name)
 				if err != nil {
 					log.Error.Printf("fc: failed to find a corresponding disk from symlink[%s], error %v", DevID+name, err)
 					return "", ""
 				}
-				dm, err1 := getMultipathDisk(DevID + name)
-				if err1 == nil {
-					log.Trace.Printf("fc: find disk: %v, dm: %v", disk, dm)
-					return disk, dm
-				}
-
+				dm := FindMultipathDeviceForDevice(disk, io)
+				return disk, dm
 			}
 		}
 	}
@@ -179,9 +201,13 @@ func findDiskWWIDs(wwid string) (string, string) {
 }
 
 // Connect attempts to connect a fc volume to this node using the provided Connector info
-func Connect(c Connector) (string, error) {
+func Connect(c Connector, io ioHandler) (string, error) {
+	if io == nil {
+		io = &osIOHandler{}
+	}
+
 	log.Trace.Printf("Connecting fibre channel volume")
-	devicePath, err := searchDisk(c)
+	devicePath, err := searchDisk(c, io)
 
 	if err != nil {
 		log.Error.Printf("unable to find disk given WWNN or WWIDs")
@@ -192,17 +218,21 @@ func Connect(c Connector) (string, error) {
 }
 
 // Disconnect performs a disconnect operation on a volume
-func Disconnect(devicePath string) error {
+func Disconnect(devicePath string, io ioHandler) error {
+	if io == nil {
+		io = &osIOHandler{}
+	}
+
 	log.Trace.Printf("Disconnecting fibre channel volume")
 	var devices []string
-	dstPath, err := filepath.EvalSymlinks(devicePath)
+	dstPath, err := io.EvalSymlinks(devicePath)
 
 	if err != nil {
 		return err
 	}
 
 	if strings.HasPrefix(dstPath, "/dev/dm-") {
-		devices = FindSlaveDevicesOnMultipath(dstPath)
+		devices = FindSlaveDevicesOnMultipath(dstPath, io)
 	} else {
 		// Add single devicepath to devices
 		devices = append(devices, dstPath)
@@ -213,7 +243,7 @@ func Disconnect(devicePath string) error {
 	var lastErr error
 
 	for _, device := range devices {
-		err := detachFCDisk(device)
+		err := detachFCDisk(device, io)
 		if err != nil {
 			log.Error.Printf("fc: detachFCDisk failed. device: %v err: %v", device, err)
 			lastErr = fmt.Errorf("fc: detachFCDisk failed. device: %v err: %v", device, err)
@@ -229,7 +259,7 @@ func Disconnect(devicePath string) error {
 }
 
 //FindSlaveDevicesOnMultipath returns all slaves on the multipath device given the device path
-func FindSlaveDevicesOnMultipath(dm string) []string {
+func FindSlaveDevicesOnMultipath(dm string, io ioHandler) []string {
 	var devices []string
 	// Split path /dev/dm-1 into "", "dev", "dm-1"
 	parts := strings.Split(dm, "/")
@@ -238,7 +268,7 @@ func FindSlaveDevicesOnMultipath(dm string) []string {
 	}
 	disk := parts[2]
 	slavesPath := path.Join("/sys/block/", disk, "/slaves/")
-	if files, err := ioutil.ReadDir(slavesPath); err == nil {
+	if files, err := io.ReadDir(slavesPath); err == nil {
 		for _, f := range files {
 			devices = append(devices, path.Join("/dev/", f.Name()))
 		}
@@ -247,21 +277,21 @@ func FindSlaveDevicesOnMultipath(dm string) []string {
 }
 
 // detachFCDisk removes scsi device file such as /dev/sdX from the node.
-func detachFCDisk(devicePath string) error {
+func detachFCDisk(devicePath string, io ioHandler) error {
 	// Remove scsi device from the node.
 	if !strings.HasPrefix(devicePath, "/dev/") {
 		return fmt.Errorf("fc detach disk: invalid device name: %s", devicePath)
 	}
 	arr := strings.Split(devicePath, "/")
 	dev := arr[len(arr)-1]
-	removeFromScsiSubsystem(dev)
+	removeFromScsiSubsystem(dev, io)
 	return nil
 }
 
 // Removes a scsi device based upon /dev/sdX name
-func removeFromScsiSubsystem(deviceName string) {
+func removeFromScsiSubsystem(deviceName string, io ioHandler) {
 	fileName := "/sys/block/" + deviceName + "/device/delete"
 	log.Trace.Printf("fc: remove device from scsi-subsystem: path: %s", fileName)
 	data := []byte("1")
-	ioutil.WriteFile(fileName, data, 0666)
+	io.WriteFile(fileName, data, 0666)
 }
