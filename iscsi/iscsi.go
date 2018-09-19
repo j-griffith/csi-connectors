@@ -22,7 +22,7 @@ var (
 type statFunc func(string) (os.FileInfo, error)
 type globFunc func(string) ([]string, error)
 
-type secrets struct {
+type Secrets struct {
 	UserName   string
 	Password   string
 	UserNameIn string
@@ -45,8 +45,8 @@ type Connector struct {
 	Port             string
 	Lun              int32
 	AuthType         string
-	DiscoverySecrets secrets
-	SessionSecrets   secrets
+	DiscoverySecrets Secrets
+	SessionSecrets   Secrets
 	Interface        string
 	Multipath        bool
 }
@@ -141,6 +141,7 @@ func waitForPathToExist(devicePath *string, maxRetries int, deviceTransport stri
 }
 
 func waitForPathToExistImpl(devicePath *string, maxRetries int, deviceTransport string, osStat statFunc, filepathGlob globFunc) bool {
+	log.Trace.Printf("Waiting for path: %s", *devicePath)
 	if devicePath == nil {
 		return false
 	}
@@ -168,6 +169,7 @@ func waitForPathToExistImpl(devicePath *string, maxRetries int, deviceTransport 
 			return true
 		}
 		if !os.IsNotExist(err) {
+			log.Error.Printf("Device %s does not exist before timeout reached", *devicePath)
 			return false
 		}
 		if i == maxRetries-1 {
@@ -213,6 +215,7 @@ func getMultipathDisk(path string) (string, error) {
 
 // Connect attempts to connect a volume to this node using the provided Connector info
 func Connect(c Connector) (string, error) {
+
 	var devicePaths []string
 	iFace := "default"
 	if c.Interface != "" {
