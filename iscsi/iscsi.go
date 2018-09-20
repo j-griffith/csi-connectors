@@ -49,6 +49,10 @@ type Connector struct {
 	SessionSecrets   Secrets
 	Interface        string
 	Multipath        bool
+	// How long (in seconds) login attempts for this interface should retry before failing
+	Timeout int32
+	// Time (in seconds) between login attempts
+	CheckInterval int32
 }
 
 func init() {
@@ -135,12 +139,12 @@ func getCurrentSessions() ([]iscsiSession, error) {
 	return session, err
 }
 
-func waitForPathToExist(devicePath *string, maxRetries int, deviceTransport string) bool {
+func waitForPathToExist(devicePath *string, maxRetries, intervalSeconds int, deviceTransport string) bool {
 	// This makes unit testing a lot easier
-	return waitForPathToExistImpl(devicePath, maxRetries, deviceTransport, os.Stat, filepath.Glob)
+	return waitForPathToExistImpl(devicePath, maxRetries, intervalSeconds, deviceTransport, os.Stat, filepath.Glob)
 }
 
-func waitForPathToExistImpl(devicePath *string, maxRetries int, deviceTransport string, osStat statFunc, filepathGlob globFunc) bool {
+func waitForPathToExistImpl(devicePath *string, maxRetries, intervalSeconds int, deviceTransport string, osStat statFunc, filepathGlob globFunc) bool {
 	log.Trace.Printf("Waiting for path: %s", *devicePath)
 	if devicePath == nil {
 		return false
@@ -175,7 +179,7 @@ func waitForPathToExistImpl(devicePath *string, maxRetries int, deviceTransport 
 		if i == maxRetries-1 {
 			break
 		}
-		time.Sleep(time.Second)
+		time.Sleep(time.Second * time.Duration(intervalSeconds))
 	}
 	return false
 }
@@ -216,6 +220,17 @@ func getMultipathDisk(path string) (string, error) {
 // Connect attempts to connect a volume to this node using the provided Connector info
 func Connect(c Connector) (string, error) {
 
+	if c.Timeout == 0 {
+		c.Timeout = 10
+	}
+	if c.CheckInterval == 0 {
+		c.CheckInterval = 1
+	}
+
+	if c.Timeout < 0 || c.CheckInterval < 0 {
+		return "", fmt.Errorf("Invalid Timeout and CheckInterval combination, both must be positive integers. "+
+			"Timeout: %d, CheckInterval: %d", c.Timeout, c.CheckInterval)
+	}
 	var devicePaths []string
 	iFace := "default"
 	if c.Interface != "" {
@@ -247,7 +262,7 @@ func Connect(c Connector) (string, error) {
 		exists, _ := sessionExists(p, c.TargetIqn)
 		if exists {
 			log.Info.Printf("found a session, check for device path: %s", devicePath)
-			if waitForPathToExist(&devicePath, 1, iscsiTransport) {
+			if waitForPathToExist(&devicePath, 1, 1, iscsiTransport) {
 				log.Info.Printf("found device path: %s", devicePath)
 				devicePaths = append(devicePaths, devicePath)
 				continue
@@ -279,7 +294,8 @@ func Connect(c Connector) (string, error) {
 		// perform the login
 		args = append(baseArgs, []string{"-l"}...)
 		runCmd("iscsiadm", args...)
-		if waitForPathToExist(&devicePath, 10, iscsiTransport) {
+		retries := int(c.Timeout / c.CheckInterval)
+		if waitForPathToExist(&devicePath, retries, int(c.CheckInterval), iscsiTransport) {
 			devicePaths = append(devicePaths, devicePath)
 			continue
 		}
