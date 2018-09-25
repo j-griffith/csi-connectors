@@ -89,7 +89,10 @@ func fakeExecCommand(command string, args ...string) *exec.Cmd {
 	cs := []string{"-test.run=TestExecCommandHelper", "--", command}
 	cs = append(cs, args...)
 	cmd := exec.Command(os.Args[0], cs...)
-	cmd.Env = []string{"GO_WANT_HELPER_PROCESS=1"}
+	es := strconv.Itoa(mockedExitStatus)
+	cmd.Env = []string{"GO_WANT_HELPER_PROCESS=1",
+		"STDOUT=" + mockedStdout,
+		"EXIT_STATUS=" + es}
 	return cmd
 }
 
@@ -187,6 +190,7 @@ func Test_extractTransportName(t *testing.T) {
 func Test_sessionExists(t *testing.T) {
 	mockedExitStatus = 0
 	mockedStdout = "tcp: [4] 192.168.1.107:3260,1 iqn.2010-10.org.openstack:volume-eb393993-73d0-4e39-9ef4-b5841e244ced (non-flash)\n"
+	execCommand = fakeExecCommand
 	type args struct {
 		tgtPortal string
 		tgtIQN    string
