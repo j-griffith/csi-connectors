@@ -304,6 +304,9 @@ func Connect(c Connector) (string, error) {
 			devicePaths = append(devicePaths, devicePath)
 			continue
 		}
+		if len(devicePaths) < 1 {
+			return "", fmt.Errorf("failed to find device path: %s", devicePath)
+		}
 		log.Trace.Printf("Device Paths: %s", devicePaths)
 		devicePath = devicePaths[0]
 		for _, path := range devicePaths {
