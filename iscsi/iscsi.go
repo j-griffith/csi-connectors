@@ -22,10 +22,15 @@ var (
 type statFunc func(string) (os.FileInfo, error)
 type globFunc func(string) ([]string, error)
 
+// Secrets provides a struct to hold our required security credentials for login
 type Secrets struct {
-	UserName   string
-	Password   string
+	// UserName is the configured iscsi user login
+	UserName string
+	// Password is the configured iscsi password
+	Password string
+	// UserNameIn provides a specific input login for directional CHAP configurations
 	UserNameIn string
+	// PasswordIn provides a specific input password for directional CHAP configurations
 	PasswordIn string
 }
 
