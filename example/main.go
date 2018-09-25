@@ -31,8 +31,10 @@ func main() {
 		SessionSecrets: iscsi.Secrets{
 			UserName: "",
 			Password: ""},
-		Lun:       int32(*lun),
-		Multipath: *multipath,
+		Lun:           int32(*lun),
+		Multipath:     *multipath,
+		Timeout:       10,
+		CheckInterval: 1,
 	}
 	path, err := iscsi.Connect(c)
 	log.Printf("path is: %s\n", path)
